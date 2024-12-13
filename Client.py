@@ -1,36 +1,61 @@
-
 import socket
-import Crypto
+import json
+from Crypto import aes_decrypt, decompose_byte  # Import functions from your crypto file
 
-# Constants
-SERVER_HOST = '127.0.0.1'  # Change this to the server's IP if it's running on a different machine
-SERVER_PORT = 5555         # Port number for the TCP connection
+# Load keys from keys.json
+def load_keys_from_json(file_path):
+    with open(file_path, "r") as f:
+        keys_hex = json.load(f)
+    # Convert keys from hex string to bytes
+    keys = {
+        int(k, 2): bytes.fromhex(v.replace("-", "")) for k, v in keys_hex.items()
+    }
+    return keys
 
+keys = load_keys_from_json("keys.json")
 
-# Function to connect to the server and send packets
-def tcp_client():
+PORT = 5555
+
+# Function to handle receiving and decrypting crumbs
+def receive_crumbs():
+    decrypted_data = []
+    total_crumbs = 100  # Assuming total number of crumbs is known
+    attempted_keys = {index: [] for index in range(total_crumbs)}  # Track attempted keys for each crumb
+    host = '127.0.0.1'
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-        try:
-            # Connect to the server
-            client_socket.connect((SERVER_HOST, SERVER_PORT))
-            print(f"[INFO] Connected to {SERVER_HOST}:{SERVER_PORT}")
+        client_socket.connect((host, PORT))
+        print("[CLIENT] Connected to server.")
 
-            # Send the packet
-            print(f"[INFO] Sending: {}")
-            client_socket.sendall(.encode('utf-8'))
+        while len(decrypted_data) < total_crumbs:
+            encrypted_crumb = client_socket.recv(1024)  # Adjust buffer size as needed
+            if not encrypted_crumb:
+                break
 
-            # Wait for acknowledgment
-            ack = client_socket.recv(1024).decode('utf-8')
-            print(f"[INFO] Received acknowledgment: {ack}")
+            print("[CLIENT] Received encrypted data.")
+            current_index = len(decrypted_data)  # Simple index to determine current crumb
+            possible_keys = [key for key in keys if key not in attempted_keys[current_index]]
 
-            # Close the connection (initiate the FIN/ACK handshake)
-            print(f"[INFO] Initiating connection close.")
-            client_socket.shutdown(socket.SHUT_RDWR)
-        except Exception as e:
-            print(f"[ERROR] An error occurred: {e}")
-        finally:
-            print(f"[INFO] Connection closed.")
+            # Try to decrypt with available keys
+            for key in possible_keys:
+                try:
+                    decrypted = aes_decrypt(encrypted_crumb, keys[key])
+                    decrypted_data.append(decrypted)
+                    attempted_keys[current_index].append(key)
+                    print(f"[CLIENT] Decryption successful with key {bin(key)}")
+                    break
+                except ValueError:
+                    print(f"[CLIENT] Decryption failed with key {bin(key)}")
 
+            # Send progress back to the server after each round
+            progress = (len(decrypted_data) / total_crumbs) * 100
+            client_socket.sendall(str(int(progress)).encode())
+
+            print(f"[CLIENT PROGRESS] {progress}% completed.")
+
+        # Once decryption is complete, send a final acknowledgment
+        client_socket.sendall("100".encode())  # 100% completed
+        print("[CLIENT] Decryption complete. Connection closed.")
 
 if __name__ == "__main__":
-    tcp_client()
+    receive_crumbs()
