@@ -1,61 +1,77 @@
 import socket
 import json
-from Crypto import aes_decrypt, decompose_byte  # Import functions from your crypto file
+from Crypto import aes_decrypt
 
-# Load keys from keys.json
+
+# Function to load keys from JSON file
 def load_keys_from_json(file_path):
     with open(file_path, "r") as f:
         keys_hex = json.load(f)
-    # Convert keys from hex string to bytes
     keys = {
-        int(k, 2): bytes.fromhex(v.replace("-", "")) for k, v in keys_hex.items()
+        k: bytes.fromhex(v.replace("-", "")) for k, v in keys_hex.items()
     }
     return keys
 
+
+# Load the keys from the JSON file
 keys = load_keys_from_json("keys.json")
 
-PORT = 5555
 
-# Function to handle receiving and decrypting crumbs
+# Client function
 def receive_crumbs():
-    decrypted_data = []
-    total_crumbs = 100  # Assuming total number of crumbs is known
-    attempted_keys = {index: [] for index in range(total_crumbs)}  # Track attempted keys for each crumb
     host = '127.0.0.1'
+    port = 5555
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-        client_socket.connect((host, PORT))
+        client_socket.connect((host, port))
         print("[CLIENT] Connected to server.")
 
-        while len(decrypted_data) < total_crumbs:
-            encrypted_crumb = client_socket.recv(1024)  # Adjust buffer size as needed
-            if not encrypted_crumb:
-                break
+        total_crumbs = 4  # Total number of crumbs expected
+        decrypted_crumbs = 0
 
-            print("[CLIENT] Received encrypted data.")
-            current_index = len(decrypted_data)  # Simple index to determine current crumb
-            possible_keys = [key for key in keys if key not in attempted_keys[current_index]]
-
-            # Try to decrypt with available keys
-            for key in possible_keys:
-                try:
-                    decrypted = aes_decrypt(encrypted_crumb, keys[key])
-                    decrypted_data.append(decrypted)
-                    attempted_keys[current_index].append(key)
-                    print(f"[CLIENT] Decryption successful with key {bin(key)}")
+        try:
+            while True:
+                encrypted_data = client_socket.recv(1024)
+                if not encrypted_data:
                     break
-                except ValueError:
-                    print(f"[CLIENT] Decryption failed with key {bin(key)}")
 
-            # Send progress back to the server after each round
-            progress = (len(decrypted_data) / total_crumbs) * 100
-            client_socket.sendall(str(int(progress)).encode())
+                print("[CLIENT] Received encrypted data.")
 
-            print(f"[CLIENT PROGRESS] {progress}% completed.")
+                # Attempt to decrypt with each key
+                decrypted = False
+                for key_index in ['00', '01', '10', '11']:
+                    key = keys[key_index]
+                    try:
+                        decrypted_data = aes_decrypt(encrypted_data, key)
+                        if decrypted_data == "When in the course of human events...":  # Example match check
+                            print(f"[CLIENT] Decryption successful with key {key_index}")
+                            decrypted_crumbs += 1
+                            decrypted = True
+                            break
+                    except Exception as e:
+                        print(f"[CLIENT] Error during decryption with key {key_index}: {str(e)}")
 
-        # Once decryption is complete, send a final acknowledgment
-        client_socket.sendall("100".encode())  # 100% completed
-        print("[CLIENT] Decryption complete. Connection closed.")
+                if not decrypted:
+                    print("[CLIENT] Failed to decrypt crumb with all keys.")
 
+                # Calculate and display progress
+                progress = (decrypted_crumbs / total_crumbs) * 100
+                client_socket.sendall(str(int(progress)).encode())
+                print(f"[CLIENT] Progress: {progress:.2f}% completed.")
+
+                # Send progress to the server
+                try:
+                    client_socket.sendall(str(int(progress)).encode())
+                except BrokenPipeError:
+                    print("[CLIENT] Connection closed by server. Exiting...")
+                    break
+
+        except KeyboardInterrupt:
+            print("[CLIENT] Exiting gracefully.")
+        finally:
+            client_socket.close()
+
+
+# Main function
 if __name__ == "__main__":
     receive_crumbs()

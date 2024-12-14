@@ -1,70 +1,61 @@
 import socket
-import threading
 import json
-from Crypto import aes_encrypt, decompose_byte  # Import functions from your crypto file
+from Crypto import aes_encrypt
 
-# Load keys from keys.json
+# Function to load keys from JSON file
 def load_keys_from_json(file_path):
     with open(file_path, "r") as f:
         keys_hex = json.load(f)
-    # Convert keys from hex string to bytes
     keys = {
-        int(k, 2): bytes.fromhex(v.replace("-", "")) for k, v in keys_hex.items()
+        k: bytes.fromhex(v.replace("-", "")) for k, v in keys_hex.items()
     }
     return keys
 
+# Load the keys from the JSON file
 keys = load_keys_from_json("keys.json")
 
-PORT = 5555
+# Server function
+def send_crumbs():
+    crumbs = ['00', '01', '10', '11']  # Binary representation of crumb keys
+    host = '127.0.0.1'
+    port = 5555
 
+    # Pre-encrypt the data for each key
+    data_to_encrypt = "When in the course of human events..."
+    encrypted_crumbs = {
+        crumb: aes_encrypt(data_to_encrypt, keys[crumb]) for crumb in crumbs
+    }
 
-def handle_client(conn, addr, file_data):
-    print(f"[NEW CONNECTION] {addr} connected.")
-    crumbs = [crumb for byte in file_data for crumb in decompose_byte(byte)]
-    print(f"[INFO] File data decomposed into crumbs: {crumbs}")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+        server_socket.bind((host, port))
+        server_socket.listen(1)
+        print("[SERVER] Listening on port", port)
 
-    while True:
-        for crumb in crumbs:
-            print(f"[SERVER] Encrypting data with key for crumb {bin(crumb)}")
-            encrypted_data = aes_encrypt(
-                "The quick brown fox jumps over the lazy dog.", keys[crumb]
-            )
-            conn.send(encrypted_data)
-            print("[SERVER] Encrypted data sent to client.")
+        conn, addr = server_socket.accept()
+        with conn:
+            print(f"[SERVER] Connected to {addr}")
 
-            ack = conn.recv(1024).decode()
-            if ack == "ACK":
-                print("[SERVER] Client acknowledged packet.")
-                continue
-            elif ack == "NACK":
-                print("[SERVER] Client rejected packet.")
+            for crumb in crumbs:
+                print(f"[SERVER] Sending encrypted data for crumb {crumb}")
+                conn.send(encrypted_crumbs[crumb])  # Send pre-encrypted data
+                print("[SERVER] Encrypted data sent to client.")
 
-        # Receive progress updates from the client
-        progress = conn.recv(1024).decode()
-        print(f"[CLIENT PROGRESS] {progress}%")
-        if progress == "100":
-            print("[SERVER] Client completed decoding. Closing connection.")
-            break
+                # Wait for acknowledgment from client
+                ack = conn.recv(1024).decode()
+                if ack == "ACK":
+                    print("[SERVER] Client acknowledged packet.")
+                elif ack == "NACK":
+                    print("[SERVER] Client rejected packet.")
 
-    conn.close()
-    print(f"[CONNECTION CLOSED] {addr}")
+            # After sending all crumbs, receive progress from client
+            progress = conn.recv(1024).decode()
+            print(f"[CLIENT PROGRESS] {progress}%")
+            
+            # Send back a final ACK or confirmation if needed
+            conn.sendall("ACK".encode())
 
-
-def start_server():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind(("", PORT))
-    server.listen(5)
-    print(f"[LISTENING] Server is listening on port {PORT}")
-
-    with open("risk.bmp", "rb") as f:
-        file_data = f.read()
-
-    while True:
-        conn, addr = server.accept()
-        thread = threading.Thread(target=handle_client, args=(conn, addr, file_data))
-        thread.start()
-        print(f"[ACTIVE CONNECTIONS] {threading.active_count() - 1}")
-
+            conn.close()
+            print(f"[SERVER] Connection closed")
 
 if __name__ == "__main__":
-    start_server()
+    send_crumbs()
