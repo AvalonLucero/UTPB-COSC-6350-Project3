@@ -73,4 +73,5 @@ def decompose_byte(byte):
 
 
 def recompose_byte(crumbs):
-    return crumbs[3] >> 6 + crumbs[2] >> 4 + crumbs[1] >> 2 + crumbs[0]
+    # Combine the crumbs back into the original byte
+    return (crumbs[0] << 6) + (crumbs[1] << 4) + (crumbs[2] << 2) + crumbs[3]
