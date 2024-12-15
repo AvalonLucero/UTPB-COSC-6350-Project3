@@ -25,55 +25,35 @@ def handle_client(conn, addr, file_data):
     conn.send(str(total_crumbs).encode())  # Send total crumbs to client
 
     crumbs_sent = 0
+    crumb_index = 1
     while crumbs_sent < total_crumbs:
         crumb = crumbs[crumbs_sent]
-        print(f"[SERVER] Encrypting data with key for crumb {bin(crumb)}")
-        encrypted_data = aes_encrypt(
-            "When in the course of human events...", keys[crumb]
-        )
+        print(f"[SERVER] Encrypting crumb {crumb} with key {bin(crumb)}")
+        print(f"[SERVER] Crumb value: {crumb}, Index: {crumb_index}")
+        encrypted_data = aes_encrypt(str(crumb), keys[crumb]) # Encrypt the crumb with its specific key
+        crumbs_sent += 1
+        crumb_index += 1
+        conn.send(encrypted_data)
 
-        # Retry loop for acknowledgment
-        while True:
-            try:
-                conn.send(encrypted_data)
-                print("[SERVER] Encrypted data sent to client.")
-                
-                # Wait for acknowledgment
-                ack = conn.recv(1024).decode()
-                if ack == "ACK":
-                    print("[SERVER] Client acknowledged packet.")
-                    crumbs_sent += 1  # Move to the next crumb
-                    break
-                elif ack == "NACK":
-                    print("[SERVER] Client rejected packet. Retrying...")
-                elif '25':
-                    print("[SERVER] Client acknowledged packet.")
-                    print(f"[SERVER] Client acknowledged progress: {ack}%")
-                    crumbs_sent += 1  # Move to the next crumb
-                    break
-                elif '50':
-                    print("[SERVER] Client acknowledged packet.")
-                    print(f"[SERVER] Client acknowledged progress: {ack}%")
-                    crumbs_sent += 1  # Move to the next crumb
-                    break
-                elif '75':
-                    print("[SERVER] Client acknowledged packet.")
-                    print(f"[SERVER] Client acknowledged progress: {ack}%")
-                    crumbs_sent += 1  # Move to the next crumb
-                    break
-                elif '100':
-                    print(f"[SERVER] Client acknowledged progress: {ack}%")
-                    break
-                else:
-                    print(f"[SERVER] Unexpected response from client: {ack}")
-            except ConnectionResetError as e:
-                print(f"[SERVER] Connection reset by client: {e}")
-                conn.close()
-                return
-
-    print("[SERVER] All crumbs sent. Closing connection.")
+    while True:
+        try:
+            ack = conn.recv(1024).decode()
+            if ack == "ACK":
+                print(f"[SERVER] Client acknowledged crumbs recieved.")
+                print("[SERVER] All crumbs sent successfully.")
+            elif ack == "NACK":
+                print(f"[SERVER] Client failed get crumbs.")
+            elif ack.startswith("PROGRESS:"):
+                # Extract and display the progress percentage
+                progress = ack.split(":")[1]
+                print(f"[SERVER] Client progress: {progress}%")
+            else:
+                print("[SERVER] Client closed connection.")
+                break
+        except ConnectionResetError as e:
+            print(f"[SERVER] Connection reset: {e}")
+            conn.close()
     conn.close()
-    print(f"[CONNECTION CLOSED] {addr}")
 
 def start_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create a socket
@@ -88,7 +68,7 @@ def start_server():
     while True:  # Continuously accept new connections
         conn, addr = server.accept()  # Accept a new connection
         print(f"[NEW CONNECTION] {addr} connected.")
-        
+
         # Start a new thread for handling the connected client
         thread = threading.Thread(target=handle_client, args=(conn, addr, file_data))
         thread.start()
@@ -96,5 +76,3 @@ def start_server():
 
 if __name__ == "__main__":
     start_server()
-
-    handle_client()
